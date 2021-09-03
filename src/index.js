@@ -1,63 +1,46 @@
 const express = require('express');
-const { ApolloServer, gql } = require('apollo-server-express');
-const models = require('./models');
+const { ApolloServer } = require('apollo-server-express');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
+// Local module imports
 const db = require('./db');
+const models = require('./models');
+const typeDefs = require('./schema');
+const resolvers = require('./resolvers');
+
+// Run our server on a port specified in our .env file or port 3000
+const port = process.env.PORT || 3000;
+const DB_HOST = process.env.DB_HOST;
 const app = express();
+db.connect(DB_HOST);
 
-const typeDefs = gql`
-  type Query {
-    hello: String!
-    notes: [Note!]!
-    note(id: ID!): Note!
-  }
-  type Note {
-    id: ID!
-    content: String!
-    author: String!
-  }
-  type Mutation {
-    newNote(content: String!): Note!
-  }
-`;
-
-const resolvers = {
-  Query: {
-    hello: () => 'Hello World',
-    notes: async () => {
-      return await models.Note.find();
-    },
-    note: async (parent, args) => {
-      return await models.Note.findById(args.id);
-    }
-  },
-  Mutation: {
-    newNote: async (parent, args) => {
-      return await models.Note.create({
-        content: args.content,
-        author: 'Adam Scott'
-      });
+const getUser = token => {
+  if (token) {
+    try {
+      return jwt.verify(token, process.env.JWT_SECRET);
+    } catch (error) {
+      console.log(error);
+      throw new Error('Session Invalid');
     }
   }
 };
-
-let notes = [
-  { id: '1', content: 'This is a note', author: 'Adam Scott' },
-  { id: '2', content: 'This is another note', author: 'Harlow Everly' },
-  { id: '3', content: 'Oh hey look, another note!', author: 'Riley Harrison' }
-];
-
-const port = process.env.PORT || 3000;
-const DB_HOST = process.env.DB_HOST;
-
-db.connect(DB_HOST);
-
-const server = new ApolloServer({ typeDefs, resolvers });
-server.applyMiddleware({ app, path: '/api' });
-app.get('/', (req, res) => {
-  res.send('Hello World');
+// Apollo Server setup
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  context: ({ req }) => {
+    // get the user token from the headers
+    const token = req.headers.authorization;
+    // try to retrieve a user with the token
+    const user = getUser(token);
+    // for now, let's log the user to the console:
+    console.log(user);
+    // add the db models and the user to the context
+    return { models, user };
+  }
 });
-
+// Apply the Apollo GraphQL middleware and set the path to /api
+server.applyMiddleware({ app, path: '/api' });
 app.listen({ port }, () =>
   console.log(
     `GraphQL Server running at http://localhost:${port}${server.graphqlPath}`
